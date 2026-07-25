@@ -141,7 +141,28 @@ function createCheckpointReport(db, playerId, checkpointNo) {
     INSERT OR IGNORE INTO ai_jobs(id, player_id, checkpoint_no, status, attempts, input_summary_json, created_at, updated_at)
     VALUES (?, ?, ?, 'PENDING', 0, ?, ?, ?)
   `).run(randomUUID(), playerId, checkpointNo, JSON.stringify(summaries), now, now);
-  return report;
+  return { report, summaries };
+}
+
+async function enrichReport(db, reporter, playerId, checkpointNo, summaries) {
+  const result = await reporter.analyze(summaries);
+  const now = Date.now();
+  if (result.source === 'ai') {
+    db.prepare(`
+      UPDATE ai_reports
+      SET source = 'ai', report_json = ?, updated_at = ?
+      WHERE player_id = ? AND checkpoint_no = ?
+    `).run(JSON.stringify(result.report), now, playerId, checkpointNo);
+    db.prepare(`
+      UPDATE ai_jobs SET status = 'SUCCEEDED', attempts = attempts + 1, updated_at = ?
+      WHERE player_id = ? AND checkpoint_no = ?
+    `).run(now, playerId, checkpointNo);
+  } else {
+    db.prepare(`
+      UPDATE ai_jobs SET status = 'FAILED', attempts = attempts + 1, last_error_code = 'RULE_FALLBACK', updated_at = ?
+      WHERE player_id = ? AND checkpoint_no = ?
+    `).run(now, playerId, checkpointNo);
+  }
 }
 
 export function createApp({ db, reporter = createReporter() }) {
@@ -322,10 +343,24 @@ export function createApp({ db, reporter = createReporter() }) {
         UPDATE game_runs SET status = 'COMPLETED', reward_exp = ?, reward_gold = ?, completed_at = ? WHERE id = ?
       `).run(completionReward.experience, completionReward.coins, now, run.id);
       const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.player.id);
-      let report = null;
-      if (player.completed_run_count % 5 === 0) report = createCheckpointReport(db, player.id, player.completed_run_count / 5);
-      return { runId: run.id, rewards: { exp: completionReward.experience, coins: completionReward.coins }, player: playerDto(player), report: report ? { source: 'rules', ...report } : undefined };
+      let checkpoint = null;
+      if (player.completed_run_count % 5 === 0) {
+        const created = createCheckpointReport(db, player.id, player.completed_run_count / 5);
+        checkpoint = { number: player.completed_run_count / 5, ...created };
+      }
+      return {
+        runId: run.id,
+        rewards: { exp: completionReward.experience, coins: completionReward.coins },
+        player: playerDto(player),
+        report: checkpoint ? { source: 'rules', ...checkpoint.report } : undefined,
+        checkpoint,
+      };
     })();
+    if (result.checkpoint) {
+      queueMicrotask(() => enrichReport(db, reporter, req.player.id, result.checkpoint.number, result.checkpoint.summaries)
+        .catch((error) => console.error('Unable to enrich learning report', error)));
+    }
+    delete result.checkpoint;
     return res.json(result);
   });
 
