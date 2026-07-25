@@ -1,0 +1,15 @@
+{
+  "name": "chick-number-blocks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first MVP for 小鸡数字积木新家",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test tests/domain/*.test.js tests/integration/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

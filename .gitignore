@@ -1,6 +1,7 @@
 node_modules/
 data/*.db
 data/*.db-*
+data/events.json
 playwright-report/
 test-results/
 .env
