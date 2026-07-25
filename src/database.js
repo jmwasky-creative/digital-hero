@@ -14,6 +14,7 @@ const schema = `
 
   CREATE TABLE IF NOT EXISTS players (
     id TEXT PRIMARY KEY,
+    client_request_id TEXT NOT NULL UNIQUE,
     nickname TEXT,
     avatar_id TEXT NOT NULL,
     level INTEGER NOT NULL DEFAULT 1 CHECK(level >= 1),
@@ -88,6 +89,7 @@ const schema = `
     selected_option_id TEXT NOT NULL,
     client_elapsed_ms INTEGER NOT NULL,
     correct INTEGER NOT NULL CHECK(correct IN (0, 1)),
+    result_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     UNIQUE (attempt_id, id)
   );
