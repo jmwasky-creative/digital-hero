@@ -1,0 +1,48 @@
+openapi: 3.1.0
+info:
+  title: Digital Hero API
+  version: 1.0.0
+servers:
+  - url: /api/v1
+paths:
+  /players:
+    post:
+      summary: Create an anonymous player
+      operationId: createPlayer
+  /me:
+    get:
+      summary: Get the current player
+    delete:
+      summary: Delete the current player and all learning data
+  /runs:
+    post:
+      summary: Start or resume a level run
+  /runs/{runId}/questions/next:
+    post:
+      summary: Issue or restore the active question attempt
+  /attempts/{attemptId}/hint:
+    post:
+      summary: Mark and return a question hint
+  /attempts/{attemptId}/answers:
+    post:
+      summary: Submit an answer response
+  /runs/{runId}/finish:
+    post:
+      summary: Finish a completed run and award rewards once
+  /reports/latest:
+    get:
+      summary: Get the latest parent report
+components:
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            retryable: { type: boolean }
+            requestId: { type: string }
