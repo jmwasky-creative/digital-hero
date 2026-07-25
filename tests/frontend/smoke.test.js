@@ -21,6 +21,9 @@ describe('game frontend shell', () => {
     expect(app).toContain("game.attempts === 1");
     expect(app).toContain('我们一起完成');
     expect(app).toContain('speechSynthesis');
+    expect(app).toContain('scheduleQuestionSpeech');
+    expect(app).toContain('playFeedbackSound');
+    expect(app).toContain('setTimeout(() => { if (game?.questions[game.index]?.id === question.id) speakQuestion(); }, 500)');
     expect(app).toContain("/api/v1");
   });
 });
