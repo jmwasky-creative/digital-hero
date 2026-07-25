@@ -5,10 +5,10 @@
 
 const APP = document.querySelector('#app');
 const MODULE_PATHS = {
-  quantity: '/game/quantity-model.js?v=5',
-  task: '/game/task-generator.js?v=5',
-  audio: '/game/audio-manager.js?v=5',
-  storage: '/game/storage.js?v=5'
+  quantity: '/game/quantity-model.js?v=6',
+  task: '/game/task-generator.js?v=6',
+  audio: '/game/audio-manager.js?v=6',
+  storage: '/game/storage.js?v=6'
 };
 
 class LocalQuantityModel {
