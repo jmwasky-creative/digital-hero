@@ -112,6 +112,77 @@ function shuffledAnswerOptions(correctAnswer, random) {
   return Object.freeze(result);
 }
 
+function normalizePositiveRange(options, minimumKey, maximumKey, defaults) {
+  const minimum = options[minimumKey] ?? defaults.minimum;
+  const maximum = options[maximumKey] ?? defaults.maximum;
+  if (!Number.isInteger(minimum) || !Number.isInteger(maximum) || minimum < 1 || maximum < minimum) {
+    throw new RangeError(`${minimumKey} and ${maximumKey} must be positive integer bounds`);
+  }
+  return { minimum, maximum };
+}
+
+export function buildTaskFingerprint(task) {
+  if (!task || !Number.isInteger(task.initialValue) || !Number.isInteger(task.targetValue) ||
+    !Number.isInteger(task.numberBlock) || !Number.isInteger(task.dropCount)) {
+    throw new TypeError("task does not contain a valid build task");
+  }
+  return ["build", task.initialValue, task.numberBlock, task.targetValue, task.dropCount].join(":");
+}
+
+/**
+ * Generates one complete "build → wind → repair" task.
+ *
+ * The numbers are derived from the same relationship used by the game UI:
+ * target = initial + numberBlock, remaining = target - dropCount,
+ * and restoreCount = dropCount. This keeps every visual step and answer
+ * consistent while still allowing a fresh task on every replay.
+ */
+export function generateBuildTask(options = {}) {
+  if (!options || typeof options !== "object") {
+    throw new TypeError("options must be an object");
+  }
+
+  const seed = normalizeSeed(options.seed ?? DEFAULT_SEED);
+  const targetRange = normalizePositiveRange(options, "minTarget", "maxTarget", { minimum: 5, maximum: 8 });
+  const addRange = normalizePositiveRange(options, "minAdd", "maxAdd", { minimum: 1, maximum: 3 });
+  const dropRange = normalizePositiveRange(options, "minDrop", "maxDrop", { minimum: 1, maximum: 2 });
+  const recentFingerprints = options.recentFingerprints ?? [];
+  if (!Array.isArray(recentFingerprints) && !(recentFingerprints instanceof Set)) {
+    throw new TypeError("recentFingerprints must be an array or Set");
+  }
+
+  const candidates = [];
+  for (let targetValue = targetRange.minimum; targetValue <= targetRange.maximum; targetValue += 1) {
+    for (let numberBlock = addRange.minimum; numberBlock <= addRange.maximum; numberBlock += 1) {
+      const initialValue = targetValue - numberBlock;
+      if (initialValue < 1) continue;
+      for (let dropCount = dropRange.minimum; dropCount <= dropRange.maximum; dropCount += 1) {
+        if (targetValue - dropCount < 1) continue;
+        candidates.push({ initialValue, targetValue, numberBlock, dropCount });
+      }
+    }
+  }
+
+  const recent = new Set(recentFingerprints);
+  const available = candidates.filter(candidate => !recent.has(buildTaskFingerprint(candidate)));
+  if (!available.length) throw new RangeError("no non-repeating build tasks are available");
+
+  const random = createSeededRandom(seed);
+  const selected = available[Math.floor(random() * available.length)];
+  const remainingValue = selected.targetValue - selected.dropCount;
+  return Object.freeze({
+    seed,
+    initialValue: selected.initialValue,
+    targetValue: selected.targetValue,
+    numberBlock: selected.numberBlock,
+    dropCount: selected.dropCount,
+    restoreCount: selected.dropCount,
+    operation: "add",
+    answerOptions: shuffledAnswerOptions(remainingValue, random),
+    fingerprint: buildTaskFingerprint(selected)
+  });
+}
+
 /**
  * Generates a deterministic addition/subtraction task within 0..20.
  *

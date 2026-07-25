@@ -5,6 +5,7 @@ import {
   createSeededRandom,
   createTaskGenerator,
   createTechnicalSliceTask,
+  generateBuildTask,
   generateArithmeticTask,
   taskFingerprint,
 } from "../../public/game/task-generator.js";
@@ -93,4 +94,31 @@ test("task streams are replayable from seed and resumable from snapshots", () =>
       .size,
     4,
   );
+});
+
+test("random build tasks keep quantity, drop, repair, and answer invariants aligned", () => {
+  const seen = new Set();
+  for (let index = 0; index < 120; index += 1) {
+    const task = generateBuildTask({
+      seed: `build-${index}`,
+      minTarget: 5,
+      maxTarget: 8,
+      minAdd: 1,
+      maxAdd: 3,
+      minDrop: 1,
+      maxDrop: 2,
+      recentFingerprints: [...seen]
+    });
+    assert.equal(task.targetValue, task.initialValue + task.numberBlock);
+    assert.equal(task.restoreCount, task.dropCount);
+    assert.ok(task.targetValue - task.dropCount >= 1);
+    assert.ok(task.answerOptions.includes(task.targetValue - task.dropCount));
+    seen.add(task.fingerprint);
+    if (seen.size === 12) seen.clear();
+  }
+
+  const first = generateBuildTask({ seed: "same-build" });
+  assert.deepEqual(first, generateBuildTask({ seed: "same-build" }));
+  const next = generateBuildTask({ seed: "same-build", recentFingerprints: [first.fingerprint] });
+  assert.notEqual(next.fingerprint, first.fingerprint);
 });
