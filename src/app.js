@@ -67,9 +67,15 @@ function hintFor(question) {
   return '把两边的数量放在一起，慢慢从一开始数一数。';
 }
 
-function chooseSkill(player) {
-  if (player.completed_run_count >= 2) return SKILLS.ADDITION_WITHIN_10;
-  return SKILLS.NUMBER_BASICS;
+export function skillForLevel(levelId) {
+  const level = Number(String(levelId).match(/(\d)$/)?.[1] ?? 1);
+  return [
+    SKILLS.NUMBER_BASICS,
+    SKILLS.ADDITION_WITHIN_10,
+    SKILLS.SUBTRACTION_WITHIN_10,
+    SKILLS.ADDITION_WITHIN_20_NO_CARRY,
+    SKILLS.SUBTRACTION_WITHIN_20_NO_BORROW,
+  ][level - 1] ?? SKILLS.NUMBER_BASICS;
 }
 
 function buildSkillUpdate(db, playerId, skillName) {
@@ -241,7 +247,7 @@ export function createApp({ db, reporter = createReporter() }) {
     if (issued) return res.json(publicIssuedQuestion(issued));
     if (run.answered_count >= run.target_question_count) return errorResponse(res, req.requestId, 409, 'RUN_READY_TO_FINISH', '本关题目已完成，请结算奖励。');
 
-    const skillName = chooseSkill(req.player);
+    const skillName = skillForLevel(run.level_id);
     const skill = db.prepare('SELECT * FROM player_skills WHERE player_id = ? AND skill_name = ?').get(req.player.id, skillName);
     const history = db.prepare('SELECT question_snapshot_json FROM question_attempts WHERE run_id = ?').all(run.id)
       .map((row) => parseJson(row.question_snapshot_json).signature);

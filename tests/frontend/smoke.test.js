@@ -17,7 +17,8 @@ describe('game frontend shell', () => {
   it('keeps the child-friendly battle safeguards in the shipped client', () => {
     const app = readFileSync(resolve(publicDir, 'app.js'), 'utf8');
 
-    expect(app).toContain('fallbackQuestions');
+    expect(app).toContain('createLocalQuestions');
+    expect(app).toContain('usedSignatures');
     expect(app).toContain("game.attempts === 1");
     expect(app).toContain('我们一起完成');
     expect(app).toContain('speechSynthesis');

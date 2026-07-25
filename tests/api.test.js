@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createApp } from '../src/app.js';
+import { createApp, skillForLevel } from '../src/app.js';
 import { openDatabase } from '../src/database.js';
 
 function setup() {
@@ -34,5 +34,21 @@ describe('game API vertical slice', () => {
     const replay = await agent.post(`/api/v1/runs/${run.body.runId}/finish`).send({}).expect(200);
     expect(replay.body.replayed).toBe(true);
     expect(replay.body.player.gold).toBe(finished.body.player.gold);
+  });
+
+  it('assigns a distinct learning focus to every 桃源村关卡', () => {
+    expect([
+      skillForLevel('taoyuan_01'),
+      skillForLevel('taoyuan_02'),
+      skillForLevel('taoyuan_03'),
+      skillForLevel('taoyuan_04'),
+      skillForLevel('taoyuan_05'),
+    ]).toEqual([
+      'number_basics',
+      'addition_within_10',
+      'subtraction_within_10',
+      'addition_within_20_no_carry',
+      'subtraction_within_20_no_borrow',
+    ]);
   });
 });

@@ -2,17 +2,53 @@ const STORAGE_KEY = 'digital-hero-ui-state-v1';
 const avatars = ['🦊', '🐼', '🐯', '🦄'];
 const names = ['小勇士', '星星侠', '闪电仔', '智慧宝'];
 
-const fallbackQuestions = [
-  [2, '+', 3, '小松鼠找到了 2 颗松果，又找到了 3 颗。', 5],
-  [7, '-', 2, '树上有 7 只小鸟，飞走了 2 只。', 5],
-  [4, '+', 4, '4 朵花和 4 朵花在一起。', 8],
-  [9, '-', 3, '9 个苹果，送给朋友 3 个。', 6],
-  [6, '+', 3, '6 颗星星又飞来了 3 颗。', 9]
-].map(([a, operator, b, story, answer], index) => ({ id: `local-${index + 1}`, a, operator, b, story, answer, options: makeOptions(answer, index) }));
+const localStoryStarts = {
+  1: ['小松鼠找到了', '小狐狸收集了', '花园里有'],
+  2: ['桃源村准备了', '小熊找到了', '小伙伴收集了'],
+  3: ['树上原来有', '篮子里原来有', '池塘边原来有'],
+  4: ['彩虹桥上有', '云海里飘着', '果园里装着'],
+  5: ['庆典上准备了', '村长送来了', '宝箱里放着'],
+};
 
-function makeOptions(answer, salt = 0) {
-  const candidates = [answer, Math.max(0, answer - (salt % 2 ? 2 : 1)), Math.min(20, answer + (salt % 3 ? 2 : 1))];
-  return [...new Set(candidates)].sort(() => (salt % 2 ? 1 : -1)).slice(0, 3);
+function randomInt(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
+function shuffle(items) { return [...items].sort(() => Math.random() - .5); }
+function makeOptions(answer) {
+  const options = new Set([answer]);
+  for (const delta of shuffle([-1, 1, -2, 2, -3, 3, -4, 4])) {
+    const candidate = answer + delta;
+    if (candidate >= 0 && candidate <= 20) options.add(candidate);
+    if (options.size === 3) break;
+  }
+  for (let candidate = 0; options.size < 3; candidate += 1) if (!options.has(candidate)) options.add(candidate);
+  return shuffle([...options]);
+}
+
+function createLocalQuestion(level, index, usedSignatures) {
+  let a; let b; let operator; let answer;
+  for (let tries = 0; tries < 50; tries += 1) {
+    if (level === 1) { a = randomInt(0, 6); b = randomInt(1, 4); operator = '+'; }
+    else if (level === 2) { a = randomInt(2, 8); b = randomInt(1, 10 - a); operator = '+'; }
+    else if (level === 3) { a = randomInt(5, 10); b = randomInt(1, a); operator = '-'; }
+    else if (level === 4) {
+      do { a = randomInt(5, 16); b = randomInt(1, 20 - a); } while ((a % 10) + (b % 10) >= 10);
+      operator = '+';
+    } else {
+      do { a = randomInt(10, 20); b = randomInt(1, a); } while ((a % 10) < (b % 10));
+      operator = '-';
+    }
+    answer = operator === '+' ? a + b : a - b;
+    const signature = `${a}${operator}${b}`;
+    if (!usedSignatures.has(signature)) { usedSignatures.add(signature); break; }
+  }
+  const noun = level <= 2 ? '颗果子' : level === 3 ? '只小鸟' : level === 4 ? '朵彩云' : '个灯笼';
+  const start = localStoryStarts[level][randomInt(0, localStoryStarts[level].length - 1)];
+  const story = operator === '+' ? `${start} ${a} ${noun}，又来了 ${b} ${noun}。` : `${start} ${a} ${noun}，送走了 ${b} ${noun}。`;
+  return { id: `local-${level}-${index}-${a}${operator}${b}`, a, operator, b, story, answer, options: makeOptions(answer) };
+}
+
+function createLocalQuestions(level) {
+  const usedSignatures = new Set();
+  return Array.from({ length: 5 }, (_, index) => createLocalQuestion(level, index, usedSignatures));
 }
 
 const safeJson = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
@@ -47,12 +83,13 @@ const api = {
 
 function normalizeQuestion(raw, index) {
   const question = raw?.question ?? raw ?? {};
-  const text = question.text ?? question.prompt ?? `${question.a ?? fallbackQuestions[index].a} ${question.operator ?? fallbackQuestions[index].operator} ${question.b ?? fallbackQuestions[index].b}`;
+  const fallback = game?.localQuestions?.[index] ?? createLocalQuestion(1, index, new Set());
+  const text = question.text ?? question.prompt ?? `${question.a ?? fallback.a} ${question.operator ?? fallback.operator} ${question.b ?? fallback.b}`;
   const match = text.match(/(\d+)\s*([+＋\-－])\s*(\d+)/);
-  const a = Number(question.a ?? match?.[1] ?? fallbackQuestions[index].a);
-  const operator = question.operator ?? match?.[2]?.replace('＋', '+').replace('－', '-') ?? fallbackQuestions[index].operator;
-  const b = Number(question.b ?? match?.[3] ?? fallbackQuestions[index].b);
-  return { id: question.id ?? question.questionId ?? `remote-${index}`, attemptId: raw?.attemptId ?? question.attemptId, a, operator, b, story: question.story ?? question.hintText ?? fallbackQuestions[index].story, options: question.options ?? fallbackQuestions[index].options, answer: question.answer };
+  const a = Number(question.a ?? match?.[1] ?? fallback.a);
+  const operator = question.operator ?? match?.[2]?.replace('＋', '+').replace('－', '-') ?? fallback.operator;
+  const b = Number(question.b ?? match?.[3] ?? fallback.b);
+  return { id: question.id ?? question.questionId ?? `remote-${index}`, attemptId: raw?.attemptId ?? question.attemptId, a, operator, b, story: question.story ?? question.hintText ?? fallback.story, options: question.options ?? fallback.options, answer: question.answer };
 }
 
 function chrome(content) { return `<div class="shell"><header class="topbar"><button class="brand" data-action="home" aria-label="回到桃源村">数 字 小 英 雄</button>${state.player ? `<div class="stat-row"><span class="stat" aria-label="经验值">⚡ ${state.exp} EXP</span><span class="stat" aria-label="金币">🪙 ${state.coins}</span></div>` : ''}</header>${content}</div>`; }
@@ -83,11 +120,11 @@ function renderResult() { const stars = game.firstTryCorrect === 5 ? 3 : game.fi
 
 async function createHero() { const player = state.draft ?? { avatar: avatars[0], nickname: names[0] }; let remote = null; try { if (!state.useMock) remote = await api.createPlayer(player); } catch { state.useMock = true; toast('现在使用离线试玩模式，进度会保存在这台设备。'); }
   state.player = { ...player, ...(remote?.player ?? remote ?? {}) }; state.exp = Number(state.player.exp ?? state.exp ?? 0); state.coins = Number(state.player.coins ?? state.coins ?? 0); persist(); renderMap(); }
-async function startLevel(level) { game = { level, runId: null, questions: [], index: 0, attempts: 0, firstTryCorrect: 0, hintShown:false, guided:false, feedback:'', feedbackKind:'', startedAt:Date.now() };
+async function startLevel(level) { game = { level, runId: null, questions: [], localQuestions: createLocalQuestions(level), index: 0, attempts: 0, firstTryCorrect: 0, hintShown:false, guided:false, feedback:'', feedbackKind:'', startedAt:Date.now() };
   try { if (!state.useMock) { const run = await api.startRun(level); game.runId = run.runId ?? run.id ?? run.run?.id; } } catch { state.useMock = true; toast('服务器暂时不可用，继续离线练习吧！'); }
-  if (game.runId) await loadRemoteQuestion(); else { game.questions = fallbackQuestions.map(q => ({...q})); renderBattle(); }
+  if (game.runId) await loadRemoteQuestion(); else { game.questions = game.localQuestions; renderBattle(); }
 }
-async function loadRemoteQuestion() { try { const payload = await api.nextQuestion(game.runId); game.questions.push(normalizeQuestion(payload, game.index)); renderBattle(); } catch { state.useMock = true; game.questions = fallbackQuestions.map(q => ({...q})); renderBattle(); toast('切换到离线练习题。'); } }
+async function loadRemoteQuestion() { try { const payload = await api.nextQuestion(game.runId); game.questions.push(normalizeQuestion(payload, game.index)); renderBattle(); } catch { state.useMock = true; game.questions = game.localQuestions; renderBattle(); toast('切换到离线练习题。'); } }
 async function giveHint() { if (!game || game.hintShown) return; game.hintShown = true; if (game.runId && game.questions[game.index].attemptId) { try { await api.hint(game.questions[game.index].attemptId); } catch {} } renderBattle(); }
 function currentAnswer(q) { return q.answer ?? (q.operator === '+' ? q.a + q.b : q.a - q.b); }
 async function chooseAnswer(value, button) { if (!game || button.disabled) return; prepareAudio(); const q=game.questions[game.index]; const correct = Number(value) === Number(currentAnswer(q)); game.attempts += 1; document.querySelectorAll('.answer').forEach(b => b.disabled = true); button.classList.add(correct ? 'correct' : 'wrong');
