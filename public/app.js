@@ -5,10 +5,10 @@
 
 const APP = document.querySelector('#app');
 const MODULE_PATHS = {
-  quantity: '/game/quantity-model.js?v=4',
-  task: '/game/task-generator.js?v=4',
-  audio: '/game/audio-manager.js?v=4',
-  storage: '/game/storage.js?v=4'
+  quantity: '/game/quantity-model.js?v=5',
+  task: '/game/task-generator.js?v=5',
+  audio: '/game/audio-manager.js?v=5',
+  storage: '/game/storage.js?v=5'
 };
 
 class LocalQuantityModel {
@@ -325,7 +325,7 @@ function actionMarkup() {
   } else if (state.phase === 'done') {
     content = `<div class="done-card"><div><b>屋顶修好啦！</b>你让 ${state.task.targetValue} 块积木变得刚刚好。<br><button class="secondary-button restart" data-action="restart">再玩一次</button></div></div>`;
   } else { content = '<div class="done-card">准备好和小鸡一起数积木了吗？</div>'; }
-  return `<section class="action-panel" aria-label="任务操作区"><p class="instruction">${info.title}<small>${info.sub}</small></p>${content}<p class="feedback ${state.feedbackTone}" role="status">${state.feedback}</p><p class="source-hint">每块积木都代表 1；数字积木会展开成对应数量。</p></section>`;
+  return `<section class="action-panel ${state.phase === 'done' ? 'complete-panel' : ''}" aria-label="任务操作区"><p class="instruction">${info.title}<small>${info.sub}</small></p>${content}<p class="feedback ${state.feedbackTone}" role="status">${state.feedback}</p><p class="source-hint">每块积木都代表 1；数字积木会展开成对应数量。</p></section>`;
 }
 function gameMarkup() {
   const value = currentValue();
