@@ -112,6 +112,9 @@ test("random build tasks keep quantity, drop, repair, and answer invariants alig
     assert.equal(task.targetValue, task.initialValue + task.numberBlock);
     assert.equal(task.restoreCount, task.dropCount);
     assert.ok(task.targetValue - task.dropCount >= 1);
+    assert.equal(task.blockOptions.length, 3);
+    assert.equal(new Set(task.blockOptions).size, 3);
+    assert.ok(task.blockOptions.includes(task.numberBlock));
     assert.ok(task.answerOptions.includes(task.targetValue - task.dropCount));
     seen.add(task.fingerprint);
     if (seen.size === 12) seen.clear();

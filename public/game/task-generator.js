@@ -112,6 +112,22 @@ function shuffledAnswerOptions(correctAnswer, random) {
   return Object.freeze(result);
 }
 
+function shuffledBlockOptions(correctBlock, random) {
+  const options = new Set([correctBlock]);
+  for (let distance = 1; options.size < 3; distance += 1) {
+    for (const candidate of [correctBlock - distance, correctBlock + distance]) {
+      if (candidate >= 1 && candidate <= 4) options.add(candidate);
+      if (options.size === 3) break;
+    }
+  }
+  const result = [...options];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return Object.freeze(result);
+}
+
 function normalizePositiveRange(options, minimumKey, maximumKey, defaults) {
   const minimum = options[minimumKey] ?? defaults.minimum;
   const maximum = options[maximumKey] ?? defaults.maximum;
@@ -178,6 +194,7 @@ export function generateBuildTask(options = {}) {
     dropCount: selected.dropCount,
     restoreCount: selected.dropCount,
     operation: "add",
+    blockOptions: shuffledBlockOptions(selected.numberBlock, random),
     answerOptions: shuffledAnswerOptions(remainingValue, random),
     fingerprint: buildTaskFingerprint(selected)
   });

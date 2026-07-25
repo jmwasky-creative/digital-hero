@@ -2,10 +2,10 @@
 
 const APP = document.querySelector('#app');
 const MODULE_PATHS = {
-  quantity: '/game/quantity-model.js?v=9',
-  task: '/game/task-generator.js?v=9',
-  audio: '/game/audio-manager.js?v=9',
-  storage: '/game/storage.js?v=9'
+  quantity: '/game/quantity-model.js?v=11',
+  task: '/game/task-generator.js?v=11',
+  audio: '/game/audio-manager.js?v=11',
+  storage: '/game/storage.js?v=11'
 };
 
 class LocalQuantityModel {
@@ -19,6 +19,7 @@ const LOCAL_TASK = Object.freeze({
   initialValue: 5,
   targetValue: 8,
   numberBlock: 3,
+  blockOptions: [1, 2, 3],
   dropCount: 2,
   restoreCount: 2,
   answerOptions: [5, 6, 7, 8]
@@ -65,6 +66,7 @@ const state = {
   feedback: '',
   feedbackTone: '',
   selectedAnswer: null,
+  selectedBlock: null,
   pendingDrop: false,
   fallingCount: 0,
   interactionLocked: false,
@@ -86,12 +88,15 @@ function normalizedTask(raw) {
     initialValue: safeNumber(source.initialValue ?? source.initial ?? LOCAL_TASK.initialValue, LOCAL_TASK.initialValue),
     targetValue: safeNumber(source.targetValue ?? source.target ?? LOCAL_TASK.targetValue, LOCAL_TASK.targetValue),
     numberBlock: safeNumber(source.numberBlock ?? source.addBlock ?? LOCAL_TASK.numberBlock, LOCAL_TASK.numberBlock),
+    blockOptions: Array.isArray(source.blockOptions) ? source.blockOptions.map(option => safeNumber(option)).filter(option => Number.isInteger(option) && option > 0) : [...LOCAL_TASK.blockOptions],
     dropCount: safeNumber(source.dropCount ?? source.windDrop ?? LOCAL_TASK.dropCount, LOCAL_TASK.dropCount),
     restoreCount: safeNumber(source.restoreCount ?? source.repairBlock ?? LOCAL_TASK.restoreCount, LOCAL_TASK.restoreCount),
     answerOptions: Array.isArray(source.answerOptions) ? source.answerOptions.map(option => safeNumber(option)).filter(Number.isFinite) : [...LOCAL_TASK.answerOptions],
     fingerprint: typeof source.fingerprint === 'string' ? source.fingerprint : ''
   };
   const expectedAfterDrop = task.targetValue - task.dropCount;
+  if (!task.blockOptions.includes(task.numberBlock)) task.blockOptions.push(task.numberBlock);
+  task.blockOptions = [...new Set(task.blockOptions)].slice(0, 3);
   if (!task.answerOptions.includes(expectedAfterDrop)) task.answerOptions.push(expectedAfterDrop);
   return task;
 }
@@ -111,6 +116,7 @@ function fallbackBuildTask(level) {
     numberBlock,
     dropCount,
     restoreCount: dropCount,
+    blockOptions: [1, 2, 3, 4].filter(option => option !== numberBlock).slice(0, 2).concat(numberBlock),
     answerOptions: [Math.max(1, remaining - 1), remaining, Math.min(8, remaining + 1), Math.min(8, remaining + 2)]
   };
 }
@@ -340,7 +346,7 @@ function welcomeMarkup() {
 function phaseInstruction() {
   const { targetValue, numberBlock, dropCount, restoreCount } = state.task;
   const level = currentLevel();
-  if (state.phase === 'fill') return { title: `${level.buildName}需要 ${targetValue} 块，选择数字 ${numberBlock} 积木补一补。`, sub: '点一下积木会展开；也可以拖到发光位置。' };
+  if (state.phase === 'fill') return { title: `${level.buildName}需要 ${targetValue} 块，选一块刚刚好的数字积木补一补。`, sub: '点一下积木会展开；也可以拖到发光位置。' };
   if (state.phase === 'placing') return { title: '小鸡正在一块一块搬上去！', sub: '一起数一数。' };
   if (state.phase === 'wind') return { title: `呀！风吹掉了 ${dropCount} 块积木。`, sub: '看看还剩多少块。' };
   if (state.phase === 'answer') return { title: '现在还剩几块？', sub: '选一个数字告诉小鸡。' };
@@ -348,8 +354,8 @@ function phaseInstruction() {
   if (state.phase === 'repairing') return { title: `小鸡正在完成${level.buildName}！`, sub: '数一数最后的积木。' };
   return { title: `第 ${state.levelIndex + 1} 关完成啦！`, sub: '你帮了大忙。' };
 }
-function sourceBlockMarkup(value, disabled) {
-  return `<button class="number-block" data-draggable-block data-source-kind="number" data-block-amount="${value}" ${disabled ? 'disabled' : ''} aria-label="数字牌 ${value}，旁边预览 ${value} 块积木。点击展开，或拖到发光的建造位置。"><span class="number-card-tag">数字牌</span><span class="number-symbol">${value}</span><span class="number-preview" aria-hidden="true">${Array.from({ length: value }, () => '<i></i>').join('')}</span><span class="number-caption">展开成 ${value} 块积木</span></button>`;
+function sourceBlockMarkup(value, disabled, selectedWrong) {
+  return `<button class="number-block ${selectedWrong ? 'wrong-choice' : ''}" data-draggable-block data-source-kind="number" data-block-amount="${value}" ${disabled ? 'disabled' : ''} aria-label="数字牌 ${value}，旁边预览 ${value} 块积木。点击选择，或拖到发光的建造位置。"><span class="number-card-tag">数字牌</span><span class="number-symbol">${value}</span><span class="number-preview" aria-hidden="true">${Array.from({ length: value }, () => '<i></i>').join('')}</span><span class="number-caption">代表 ${value} 块积木</span></button>`;
 }
 function unitBlockMarkup(index, disabled) {
   return `<button class="unit-source" data-draggable-block data-source-kind="unit" data-block-amount="1" data-unit-id="${index}" ${disabled ? 'disabled' : ''} aria-label="第 ${index + 1} 块积木，每块代表 1。点击或拖到发光的建造位置。"><span class="unit-face">1</span><span class="unit-caption">一块积木</span></button>`;
@@ -359,7 +365,7 @@ function actionMarkup() {
   const value = currentValue();
   let content = '';
   if (state.phase === 'fill' || state.phase === 'placing') {
-    content = `<div class="block-tray">${sourceBlockMarkup(state.task.numberBlock, state.phase === 'placing')}</div>${state.expandedCount ? `<div class="expanded-units" aria-label="${state.expandedCount} 块积木正在搬运">${Array.from({ length: state.expandedCount }, () => '<i class="mini-unit"></i>').join('')}</div>` : ''}`;
+    content = `<div class="block-tray number-options" role="group" aria-label="选择一块数字积木">${[...state.task.blockOptions].sort((a, b) => a - b).map(option => sourceBlockMarkup(option, state.phase === 'placing' || state.interactionLocked, state.selectedBlock === option)).join('')}</div>${state.expandedCount ? `<div class="expanded-units" aria-label="${state.expandedCount} 块积木正在搬运">${Array.from({ length: state.expandedCount }, () => '<i class="mini-unit"></i>').join('')}</div>` : ''}`;
   } else if (state.phase === 'answer') {
     content = `<div class="answer-tray" role="group" aria-label="选择还剩的积木数">${[...state.task.answerOptions].sort((a, b) => a - b).map(option => `<button class="answer-button ${state.selectedAnswer === option ? (option === value ? 'correct' : 'wrong') : ''}" data-answer="${option}" aria-label="${option} 块" ${state.interactionLocked ? 'disabled' : ''}>${option}</button>`).join('')}</div>`;
   } else if (state.phase === 'restore' || state.phase === 'repairing') {
@@ -390,9 +396,10 @@ function resetCurrentLevel() {
   state.phase = 'fill';
   state.expandedCount = 0;
   state.lastChange = null;
-  state.feedback = `看看发光的空位，刚好还差 ${state.task.numberBlock} 块。`;
+  state.feedback = '数一数现在有多少块，再选一块刚刚好的数字积木。';
   state.feedbackTone = '';
   state.selectedAnswer = null;
+  state.selectedBlock = null;
   state.pendingDrop = false;
   state.fallingCount = 0;
   state.interactionLocked = false;
@@ -407,7 +414,22 @@ function changeQuantity(kind, amount, meta) {
   return { before, after };
 }
 async function useSourceBlock(amount) {
-  if (!state.task || state.phase !== 'fill' || amount !== state.task.numberBlock) return;
+  if (!state.task || state.phase !== 'fill' || state.interactionLocked) return;
+  if (amount !== state.task.numberBlock) {
+    state.selectedBlock = amount;
+    state.interactionLocked = true;
+    state.feedback = `这张数字牌代表 ${amount} 块。再数一数现在有多少块、需要多少块。`;
+    state.feedbackTone = 'gentle';
+    render();
+    playEffect('answer.retry');
+    appendEvent('number_block_selected', { amount, expected: state.task.numberBlock, correct: false });
+    await speakAndWait(`这张数字牌代表 ${amount} 块。再数一数现在有多少块，需要多少块。`, { rate: .92 });
+    await sleep(650);
+    state.selectedBlock = null;
+    state.interactionLocked = false;
+    render();
+    return;
+  }
   state.phase = 'placing';
   state.expandedCount = amount;
   state.feedback = `数字 ${amount} 变成 ${amount} 块小积木啦！`;
@@ -415,7 +437,7 @@ async function useSourceBlock(amount) {
   render();
   playEffect('ui.tap');
   readNumber(amount);
-  appendEvent('number_block_opened', { amount });
+  appendEvent('number_block_selected', { amount, expected: state.task.numberBlock, correct: true });
   await sleep(320);
   for (let index = 0; index < amount; index += 1) {
     changeQuantity('add', 1, { source: 'number_block', amount, step: index + 1 });
@@ -565,7 +587,7 @@ async function startGame() {
   state.screen = 'game';
   render();
   const level = currentLevel();
-  const voiceText = `第 ${state.levelIndex + 1} 关，${level.buildName}需要 ${state.task.targetValue} 块积木。现在有 ${state.task.initialValue} 块，请找数字 ${state.task.numberBlock} 的积木补一补。`;
+  const voiceText = `第 ${state.levelIndex + 1} 关，${level.buildName}需要 ${state.task.targetValue} 块积木。现在有 ${state.task.initialValue} 块，请选一块数字积木补一补。`;
   appendEvent('task_started', { taskId: state.task.fingerprint || `${state.runSeed}:${level.id}`, levelId: level.id });
   scheduleTaskRead({ ...state.task, currentValue: state.task.initialValue, voiceText }, voiceText, 500);
 }
@@ -577,7 +599,7 @@ function advanceLevel() {
   resetCurrentLevel();
   render();
   const level = currentLevel();
-  const voiceText = `第 ${state.levelIndex + 1} 关，${level.buildName}需要 ${state.task.targetValue} 块积木。现在有 ${state.task.initialValue} 块，请找数字 ${state.task.numberBlock} 的积木补一补。`;
+  const voiceText = `第 ${state.levelIndex + 1} 关，${level.buildName}需要 ${state.task.targetValue} 块积木。现在有 ${state.task.initialValue} 块，请选一块数字积木补一补。`;
   appendEvent('task_started', { taskId: state.task.fingerprint || `${state.runSeed}:${level.id}`, levelId: level.id });
   scheduleTaskRead({ ...state.task, currentValue: state.task.initialValue, voiceText }, voiceText, 500);
 }

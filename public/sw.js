@@ -1,13 +1,13 @@
-const CACHE_NAME = "chick-number-blocks-v9";
+const CACHE_NAME = "chick-number-blocks-v11";
 const CORE_ASSETS = [
   "/",
   "/index.html",
-  "/styles.css?v=9",
-  "/app.js?v=9",
-  "/game/quantity-model.js?v=9",
-  "/game/task-generator.js?v=9",
-  "/game/storage.js?v=9",
-  "/game/audio-manager.js?v=9"
+  "/styles.css?v=11",
+  "/app.js?v=11",
+  "/game/quantity-model.js?v=11",
+  "/game/task-generator.js?v=11",
+  "/game/storage.js?v=11",
+  "/game/audio-manager.js?v=11"
 ];
 const CORE_PATHS = new Set(CORE_ASSETS.map((asset) =>
   new URL(asset, self.location.origin).pathname
