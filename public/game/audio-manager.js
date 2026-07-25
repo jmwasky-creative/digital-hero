@@ -21,7 +21,9 @@ const EFFECT_RECIPES = {
   "block.snap": [[260, 0, 0.08, 0.25], [520, 0.07, 0.14, 0.2]],
   "block.return": [[420, 0, 0.12, 0.15], [260, 0.1, 0.18, 0.12]],
   "count.step": [[620, 0, 0.1, 0.18]],
-  "block.drop": [[190, 0, 0.12, 0.22], [110, 0.08, 0.2, 0.12]],
+  // A compact, softly damped wooden tap. The quiet upper resonance adds
+  // definition without the low two-note "thud" becoming harsh when layered.
+  "block.drop": [[360, 0, 0.055, 0.13], [540, 0.004, 0.025, 0.035]],
   "answer.correct": [[523, 0, 0.18, 0.2], [659, 0.12, 0.2, 0.18], [784, 0.24, 0.32, 0.16]],
   "answer.retry": [[330, 0, 0.2, 0.12], [294, 0.18, 0.25, 0.1]],
   "build.complete": [[392, 0, 0.22, 0.14], [523, 0.16, 0.28, 0.14], [659, 0.36, 0.42, 0.13]]
@@ -47,6 +49,7 @@ export class AudioManager {
     this.buffers = new Map();
     this.activeSources = new Set();
     this.lastPlayedAt = new Map();
+    this.pendingSpeech = null;
     this.tracks = copyTracks(DEFAULT_TRACKS);
     this.loadSettings();
   }
@@ -209,6 +212,9 @@ export class AudioManager {
   }
 
   stopSpeech() {
+    const pending = this.pendingSpeech;
+    this.pendingSpeech = null;
+    pending?.settle(false);
     try {
       this.environment.speechSynthesis?.cancel();
     } catch {
@@ -216,22 +222,64 @@ export class AudioManager {
     }
   }
 
+  createUtterance(text, options = {}) {
+    const Utterance = this.environment.SpeechSynthesisUtterance;
+    if (!Utterance || !text) return null;
+    const utterance = new Utterance(String(text));
+    utterance.lang = options.lang || "zh-CN";
+    utterance.rate = options.rate ?? 0.82;
+    utterance.pitch = options.pitch ?? 1.08;
+    utterance.volume = this.tracks.voice.volume;
+    return utterance;
+  }
+
   speak(text, options = {}) {
     const synthesis = this.environment.speechSynthesis;
-    const Utterance = this.environment.SpeechSynthesisUtterance;
-    if (!this.tracks.voice.enabled || !synthesis || !Utterance || !text) return false;
+    if (!this.tracks.voice.enabled || !synthesis) return false;
     try {
-      synthesis.cancel();
-      const utterance = new Utterance(String(text));
-      utterance.lang = options.lang || "zh-CN";
-      utterance.rate = options.rate || 0.82;
-      utterance.pitch = options.pitch || 1.08;
-      utterance.volume = this.tracks.voice.volume;
+      const utterance = this.createUtterance(text, options);
+      if (!utterance) return false;
+      this.stopSpeech();
       synthesis.speak(utterance);
       return true;
     } catch {
       return false;
     }
+  }
+
+  speakAndWait(text, options = {}) {
+    const synthesis = this.environment.speechSynthesis;
+    if (!this.tracks.voice.enabled || !synthesis) return Promise.resolve(false);
+
+    let utterance;
+    try {
+      utterance = this.createUtterance(text, options);
+    } catch {
+      return Promise.resolve(false);
+    }
+    if (!utterance) return Promise.resolve(false);
+
+    this.stopSpeech();
+    return new Promise((resolve) => {
+      let settled = false;
+      const pending = {
+        utterance,
+        settle: (completed) => {
+          if (settled) return;
+          settled = true;
+          if (this.pendingSpeech === pending) this.pendingSpeech = null;
+          resolve(completed);
+        }
+      };
+      this.pendingSpeech = pending;
+      utterance.onend = () => pending.settle(true);
+      utterance.onerror = () => pending.settle(false);
+      try {
+        synthesis.speak(utterance);
+      } catch {
+        pending.settle(false);
+      }
+    });
   }
 
   speakNumber(number, options = {}) {

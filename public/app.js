@@ -5,10 +5,10 @@
 
 const APP = document.querySelector('#app');
 const MODULE_PATHS = {
-  quantity: '/game/quantity-model.js',
-  task: '/game/task-generator.js',
-  audio: '/game/audio-manager.js',
-  storage: '/game/storage.js'
+  quantity: '/game/quantity-model.js?v=4',
+  task: '/game/task-generator.js?v=4',
+  audio: '/game/audio-manager.js?v=4',
+  storage: '/game/storage.js?v=4'
 };
 
 class LocalQuantityModel {
@@ -58,6 +58,7 @@ const state = {
   selectedAnswer: null,
   pendingDrop: false,
   fallingCount: 0,
+  interactionLocked: false,
   audioUnlocked: false,
   scheduleId: 0,
   drag: null,
@@ -203,7 +204,12 @@ async function unlockAudio() {
   } catch {}
   state.audioUnlocked = true;
 }
-function stopSpeech() { try { window.speechSynthesis?.cancel(); } catch {} }
+function stopSpeech() {
+  try {
+    if (typeof runtime.audio?.stopSpeech === 'function') runtime.audio.stopSpeech();
+    else window.speechSynthesis?.cancel();
+  } catch {}
+}
 function speak(text) {
   if (!text || !state.audioUnlocked) return;
   try {
@@ -217,6 +223,29 @@ function speak(text) {
     utterance.rate = .86;
     window.speechSynthesis.speak(utterance);
   } catch {}
+}
+async function speakAndWait(text, options = {}) {
+  if (!text || !state.audioUnlocked) return false;
+  try {
+    if (typeof runtime.audio?.speakAndWait === 'function') {
+      return await runtime.audio.speakAndWait(text, options);
+    }
+  } catch {
+    return false;
+  }
+
+  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return false;
+  stopSpeech();
+  return await new Promise(resolve => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = options.lang || 'zh-CN';
+    utterance.rate = options.rate ?? .86;
+    utterance.pitch = options.pitch ?? 1.08;
+    utterance.onend = () => resolve(true);
+    utterance.onerror = () => resolve(false);
+    try { window.speechSynthesis.speak(utterance); }
+    catch { resolve(false); }
+  });
 }
 function playEffect(name) {
   try {
@@ -247,16 +276,12 @@ function scheduleTaskRead(task, fallbackText, delay = 0) {
     if (token === state.scheduleId && state.screen === 'game') readTask(task, fallbackText);
   }, delay);
 }
-function countDots(count) { return Array.from({ length: count }, () => '<i></i>').join(''); }
-function blocksMarkup(value) {
-  const changed = state.lastChange?.kind === 'add' ? state.lastChange.count : 0;
-  return Array.from({ length: value }, (_, index) => `<i class="placed-block ${index >= value - changed ? 'added' : 'remain'}"></i>`).join('');
-}
-function slotsMarkup(value, target) {
+function roofBlocksMarkup(value, target) {
   return Array.from({ length: target }, (_, index) => {
     const filled = index < value;
     const added = filled && state.lastChange?.kind === 'add' && index >= state.lastChange.before;
-    return `<i class="slot ${filled ? 'filled' : 'missing'} ${added ? 'added' : ''}"></i>`;
+    const layer = index < 5 ? 'bottom' : 'top';
+    return `<i class="roof-block ${layer} ${filled ? 'filled' : 'missing'} ${added ? 'added' : ''}" aria-hidden="true"></i>`;
   }).join('');
 }
 function topBar() {
@@ -280,7 +305,10 @@ function phaseInstruction() {
   return { title: '小鸡的新家完成啦！', sub: '你帮了大忙。' };
 }
 function sourceBlockMarkup(value, disabled) {
-  return `<button class="number-block" data-number-block="${value}" ${disabled ? 'disabled' : ''} aria-label="数字 ${value} 积木，代表 ${value} 块积木。点击展开，或拖到屋顶。"><span class="number-symbol">${value}</span><span class="number-dots" aria-hidden="true">${countDots(value)}</span></button>`;
+  return `<button class="number-block" data-draggable-block data-source-kind="number" data-block-amount="${value}" ${disabled ? 'disabled' : ''} aria-label="数字牌 ${value}，旁边预览 ${value} 块积木。点击展开，或拖到屋顶。"><span class="number-card-tag">数字牌</span><span class="number-symbol">${value}</span><span class="number-preview" aria-hidden="true">${Array.from({ length: value }, () => '<i></i>').join('')}</span><span class="number-caption">展开成 ${value} 块积木</span></button>`;
+}
+function unitBlockMarkup(index, disabled) {
+  return `<button class="unit-source" data-draggable-block data-source-kind="unit" data-block-amount="1" data-unit-id="${index}" ${disabled ? 'disabled' : ''} aria-label="第 ${index + 1} 块积木，每块代表 1。点击或拖到屋顶。"><span class="unit-face">1</span><span class="unit-caption">一块积木</span></button>`;
 }
 function actionMarkup() {
   const info = phaseInstruction();
@@ -289,9 +317,11 @@ function actionMarkup() {
   if (state.phase === 'fill' || state.phase === 'placing') {
     content = `<div class="block-tray">${sourceBlockMarkup(state.task.numberBlock, state.phase === 'placing')}</div>${state.expandedCount ? `<div class="expanded-units" aria-label="${state.expandedCount} 块积木正在搬运">${Array.from({ length: state.expandedCount }, () => '<i class="mini-unit"></i>').join('')}</div>` : ''}`;
   } else if (state.phase === 'answer') {
-    content = `<div class="answer-tray" role="group" aria-label="选择还剩的积木数">${[...state.task.answerOptions].sort((a, b) => a - b).map(option => `<button class="answer-button ${state.selectedAnswer === option ? (option === value ? 'correct' : 'wrong') : ''}" data-answer="${option}" aria-label="${option} 块">${option}</button>`).join('')}</div>`;
+    content = `<div class="answer-tray" role="group" aria-label="选择还剩的积木数">${[...state.task.answerOptions].sort((a, b) => a - b).map(option => `<button class="answer-button ${state.selectedAnswer === option ? (option === value ? 'correct' : 'wrong') : ''}" data-answer="${option}" aria-label="${option} 块" ${state.interactionLocked ? 'disabled' : ''}>${option}</button>`).join('')}</div>`;
   } else if (state.phase === 'restore' || state.phase === 'repairing') {
-    content = `<div class="block-tray">${sourceBlockMarkup(state.task.restoreCount, state.phase === 'repairing')}</div>${state.expandedCount ? `<div class="expanded-units" aria-label="${state.expandedCount} 块积木正在修屋顶">${Array.from({ length: state.expandedCount }, () => '<i class="mini-unit"></i>').join('')}</div>` : ''}`;
+    const remainingUnits = Math.max(0, state.task.targetValue - value);
+    const restoredUnits = Math.max(0, value - (state.task.targetValue - state.task.dropCount));
+    content = `<div class="block-tray unit-tray" aria-label="两块独立的单位积木">${Array.from({ length: remainingUnits }, (_, index) => unitBlockMarkup(restoredUnits + index, state.phase === 'repairing' || state.interactionLocked)).join('')}</div>`;
   } else if (state.phase === 'done') {
     content = `<div class="done-card"><div><b>屋顶修好啦！</b>你让 ${state.task.targetValue} 块积木变得刚刚好。<br><button class="secondary-button restart" data-action="restart">再玩一次</button></div></div>`;
   } else { content = '<div class="done-card">准备好和小鸡一起数积木了吗？</div>'; }
@@ -303,7 +333,7 @@ function gameMarkup() {
   const remaining = Math.max(0, targetValue - value);
   const roofClass = state.phase === 'done' ? 'finished' : state.phase === 'wind' || state.phase === 'answer' || state.phase === 'restore' || state.phase === 'repairing' ? 'shaking' : 'pending';
   const wind = state.phase === 'wind';
-  return `<div class="app-shell">${topBar()}${technicalNotice()}<section class="game-card"><header class="level-header"><div class="level-copy"><strong>第一关 · 小鸡的屋顶</strong><span>第一个任务：补一补，修一修</span></div><div class="progress-wrap"><div class="progress-label"><span>新家进度</span><span>${state.phase === 'done' ? '完成！' : '1 / 5'}</span></div><div class="progress-rail"><span style="width:${state.phase === 'done' ? 100 : state.phase === 'restore' || state.phase === 'repairing' ? 82 : state.phase === 'answer' ? 63 : value >= targetValue ? 48 : 24}%"></span></div></div></header><section class="quantity-panel" aria-label="数量信息"><div class="quantity-card current"><span class="quantity-label">现在有</span><strong class="quantity-value">${value}</strong></div><div class="quantity-card target"><span class="quantity-label">屋顶需要</span><strong class="quantity-value">${targetValue}</strong></div><div class="quantity-card missing"><span class="quantity-label">还差</span><strong class="quantity-value">${remaining}</strong></div></section><section class="scene" aria-label="小鸡的新家和积木"><i class="cloud one"></i><i class="cloud two"></i><div class="house-zone"><span class="house-label">发光屋顶位置</span><div class="roof ${roofClass}"></div><div class="slot-row" data-drop-zone aria-label="把数字积木拖到屋顶的发光位置">${slotsMarkup(value, targetValue)}</div><div class="house-body"></div></div><div class="wind-lines ${wind ? 'active' : ''}" aria-hidden="true"><span></span><span></span><span></span></div>${state.pendingDrop ? `<div class="fallen-blocks" aria-label="风吹掉 ${state.fallingCount} 块积木">${Array.from({ length: state.fallingCount }, () => '<i class="fallen-block falling"></i>').join('')}</div>` : ''}<div class="placed-blocks" aria-label="现在有 ${value} 块真实积木">${blocksMarkup(value)}</div><div class="chick-row" aria-hidden="true"><div class="chick ${state.phase === 'done' ? 'cheer' : ''}">🐥</div><div class="chick ${state.phase === 'done' ? 'cheer' : ''}">🐤</div></div></section>${actionMarkup()}</section></div>`;
+  return `<div class="app-shell">${topBar()}${technicalNotice()}<section class="game-card"><header class="level-header"><div class="level-copy"><strong>第一关 · 小鸡的屋顶</strong><span>第一个任务：补一补，修一修</span></div><div class="progress-wrap"><div class="progress-label"><span>新家进度</span><span>${state.phase === 'done' ? '完成！' : '1 / 5'}</span></div><div class="progress-rail"><span style="width:${state.phase === 'done' ? 100 : state.phase === 'restore' || state.phase === 'repairing' ? 82 : state.phase === 'answer' ? 63 : value >= targetValue ? 48 : 24}%"></span></div></div></header><section class="quantity-panel" aria-label="数量信息"><div class="quantity-card current"><span class="quantity-label">现在有</span><strong class="quantity-value">${value}</strong></div><div class="quantity-card target"><span class="quantity-label">屋顶需要</span><strong class="quantity-value">${targetValue}</strong></div><div class="quantity-card missing"><span class="quantity-label">还差</span><strong class="quantity-value">${remaining}</strong></div></section><section class="scene" aria-label="小鸡的新家和积木"><i class="cloud one"></i><i class="cloud two"></i><div class="house-zone"><span class="house-label">8 块积木屋顶</span><div class="roof-block-grid ${roofClass}" data-drop-zone aria-label="把积木拖到屋顶的发光位置">${roofBlocksMarkup(value, targetValue)}</div><div class="house-body"></div></div><div class="wind-lines ${wind ? 'active' : ''}" aria-hidden="true"><span></span><span></span><span></span></div>${state.pendingDrop ? `<div class="fallen-blocks" aria-label="风吹掉 ${state.fallingCount} 块积木">${Array.from({ length: state.fallingCount }, () => '<i class="fallen-block falling"></i>').join('')}</div>` : ''}<div class="chick-row" aria-hidden="true"><div class="chick ${state.phase === 'done' ? 'cheer' : ''}">🐥</div><div class="chick ${state.phase === 'done' ? 'cheer' : ''}">🐤</div></div></section>${actionMarkup()}</section></div>`;
 }
 function render() { APP.innerHTML = state.screen === 'welcome' ? welcomeMarkup() : gameMarkup(); }
 function resetTechnicalSlice() {
@@ -317,6 +347,7 @@ function resetTechnicalSlice() {
   state.selectedAnswer = null;
   state.pendingDrop = false;
   state.fallingCount = 0;
+  state.interactionLocked = false;
   state.scheduleId += 1;
   persist();
 }
@@ -328,11 +359,8 @@ function changeQuantity(kind, amount, meta) {
   return { before, after };
 }
 async function useSourceBlock(amount) {
-  if (!state.task || !['fill', 'restore'].includes(state.phase)) return;
-  const required = state.phase === 'fill' ? state.task.numberBlock : state.task.restoreCount;
-  if (amount !== required) return;
-  const addingToTarget = state.phase === 'fill';
-  state.phase = addingToTarget ? 'placing' : 'repairing';
+  if (!state.task || state.phase !== 'fill' || amount !== state.task.numberBlock) return;
+  state.phase = 'placing';
   state.expandedCount = amount;
   state.feedback = `数字 ${amount} 变成 ${amount} 块小积木啦！`;
   state.feedbackTone = '';
@@ -353,32 +381,54 @@ async function useSourceBlock(amount) {
     await sleep(480);
   }
   state.expandedCount = 0;
-  if (addingToTarget) {
-    state.phase = 'wind';
-    state.pendingDrop = true;
-    state.fallingCount = 0;
+  state.phase = 'wind';
+  state.pendingDrop = true;
+  state.fallingCount = 0;
+  state.feedback = '有 8 块啦！大风要来了。';
+  state.feedbackTone = '';
+  render();
+  await speakAndWait('大风来了。', { rate: .92 });
+  // Every removal commits to QuantityModel before its own falling frame.
+  for (let index = 0; index < state.task.dropCount; index += 1) {
+    changeQuantity('remove', 1, { source: 'wind', count: state.task.dropCount, step: index + 1 });
+    state.fallingCount = index + 1;
+    state.feedback = `风吹掉了 ${state.fallingCount} 块，看看还剩多少。`;
+    state.feedbackTone = 'gentle';
     render();
-    speak(`呀，风吹掉了 ${state.task.dropCount} 块积木。`);
-    // Every removal commits to QuantityModel before its own falling frame.
-    for (let index = 0; index < state.task.dropCount; index += 1) {
-      changeQuantity('remove', 1, { source: 'wind', count: state.task.dropCount, step: index + 1 });
-      state.fallingCount = index + 1;
-      state.feedback = `风吹掉了 ${state.fallingCount} 块，看看还剩多少。`;
-      state.feedbackTone = 'gentle';
-      render();
-      playEffect('block.drop');
-      await sleep(430);
-    }
-    await sleep(420);
-    state.phase = 'answer';
-    state.pendingDrop = false;
-    state.fallingCount = 0;
-    state.feedback = '选一个数字，告诉小鸡现在还剩几块。';
-    state.feedbackTone = '';
-    persist();
-    render();
-    scheduleSpeech('现在还剩几块？', 120);
-  } else {
+    playEffect('block.drop');
+    await sleep(430);
+  }
+  await sleep(420);
+  state.phase = 'answer';
+  state.pendingDrop = false;
+  state.fallingCount = 0;
+  state.interactionLocked = true;
+  state.feedback = '风吹掉了两块积木。听完问题再回答。';
+  state.feedbackTone = '';
+  persist();
+  render();
+  await speakAndWait('掉了两块。还剩几块？', { rate: .92 });
+  state.interactionLocked = false;
+  state.feedback = '选一个数字，告诉小鸡现在还剩几块。';
+  render();
+}
+async function useUnitBlock(unitId) {
+  if (!state.task || state.interactionLocked || state.phase !== 'restore' || currentValue() >= state.task.targetValue) return;
+  state.phase = 'repairing';
+  state.feedback = '小鸡把这一块积木轻轻放到屋顶上。';
+  state.feedbackTone = '';
+  render();
+  playEffect('ui.tap');
+  appendEvent('unit_block_opened', { unitId });
+  changeQuantity('add', 1, { source: 'unit_block', unitId });
+  state.feedback = `补好一块，现在有 ${currentValue()} 块。`;
+  state.feedbackTone = 'good';
+  render();
+  playEffect('block.snap');
+  playEffect('count.step');
+  readNumber(currentValue());
+  await sleep(480);
+  if (currentValue() >= state.task.targetValue) {
     state.phase = 'done';
     state.feedback = '刚刚好！屋顶牢牢地搭好啦！';
     state.feedbackTone = 'good';
@@ -386,12 +436,18 @@ async function useSourceBlock(amount) {
     render();
     playEffect('build.complete');
     speak('太棒啦，屋顶修好啦！');
+  } else {
+    state.phase = 'restore';
+    state.feedback = '还有一块积木，再放上去吧。';
+    state.feedbackTone = '';
+    render();
   }
 }
-function chooseAnswer(answer) {
-  if (state.phase !== 'answer') return;
+async function chooseAnswer(answer) {
+  if (state.phase !== 'answer' || state.interactionLocked) return;
   const expected = currentValue();
   state.selectedAnswer = answer;
+  state.interactionLocked = true;
   appendEvent('answer_selected', { answer, expected });
   if (answer === expected) {
     state.phase = 'restore';
@@ -399,13 +455,17 @@ function chooseAnswer(answer) {
     state.feedbackTone = 'good';
     render();
     playEffect('answer.correct');
-    speak(`对啦，还剩 ${expected} 块。再补两块。`);
+    await speakAndWait('对啦，还剩六块。请补回两块。', { rate: .92 });
+    state.interactionLocked = false;
+    render();
   } else {
     state.feedback = '差一点。看看屋顶上留下的积木，再数一数。';
     state.feedbackTone = 'gentle';
     render();
     playEffect('answer.retry');
-    speak('差一点，我们一起看看还剩几块。');
+    await speakAndWait('再数一次屋顶上的积木。', { rate: .92 });
+    state.interactionLocked = false;
+    render();
   }
 }
 function invalidDrop() {
@@ -441,7 +501,10 @@ function pointerEnd(event) {
   button.style.transform = '';
   if (!state.lastPointerDrag) return;
   const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-drop-zone]');
-  if (target) useSourceBlock(safeNumber(button.dataset.numberBlock));
+  if (target) {
+    if (button.dataset.sourceKind === 'unit') useUnitBlock(button.dataset.unitId);
+    else useSourceBlock(safeNumber(button.dataset.blockAmount));
+  }
   else invalidDrop();
 }
 async function startGame() {
@@ -495,10 +558,13 @@ APP.addEventListener('click', event => {
   if (button.dataset.action === 'start') startGame();
   else if (button.dataset.action === 'repeat') repeatInstruction();
   else if (button.dataset.action === 'restart') restart();
-  else if (button.dataset.numberBlock && !state.lastPointerDrag) useSourceBlock(safeNumber(button.dataset.numberBlock));
+  else if (button.hasAttribute('data-draggable-block') && !state.lastPointerDrag) {
+    if (button.dataset.sourceKind === 'unit') useUnitBlock(button.dataset.unitId);
+    else useSourceBlock(safeNumber(button.dataset.blockAmount));
+  }
   else if (button.dataset.answer) chooseAnswer(safeNumber(button.dataset.answer));
 });
-APP.addEventListener('pointerdown', event => { const button = event.target.closest('[data-number-block]'); if (button) pointerStart(event, button); });
+APP.addEventListener('pointerdown', event => { const button = event.target.closest('[data-draggable-block]'); if (button) pointerStart(event, button); });
 window.addEventListener('pointermove', pointerMove, { passive: true });
 window.addEventListener('pointerup', pointerEnd, { passive: true });
 window.addEventListener('pointercancel', pointerEnd, { passive: true });
