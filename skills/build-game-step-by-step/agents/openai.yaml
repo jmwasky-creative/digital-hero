@@ -1,0 +1,4 @@
+interface:
+  display_name: "一步一步做游戏"
+  short_description: "从需求、原型、开发、音效到浏览器验收的逐步游戏制作流程"
+  default_prompt: "使用 $build-game-step-by-step，逐步帮助我把游戏想法做成可运行、可测试、可提交的版本。"
